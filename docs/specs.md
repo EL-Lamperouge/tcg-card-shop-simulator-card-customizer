@@ -217,8 +217,10 @@ Vitality Level Add = 20
 
 ### 仕様
 #### 1. カード名の置き換え
-- ゲームディレクトリの`BepInEx/TextureReplacer/objects_data/card/{OriginalCardName}_NAME.txt`に、置き換えたい名前を記載することで反映される。
-- サンプルは本プロジェクトの`/BepInEx/TextureReplacer/objects_data/card`配下に格納。
+- ゲームディレクトリの`BepInEx/plugins/CustomExpansionPackImages/Configs/Custom/<Expansion>Configs/<CardId>.ini`に記載された`Name = xxx`を編集することで反映される。
+- `<Expansion>Configs`直下の`.ini`のみを対象とし、`FullExpansionsConfigs`や`org`/`translated`などのサブディレクトリはツールの探索対象から除外する。
+- `<Expansion>`の名称をエクスパンション名としてUIに渡し、同名カードでもエクスパンション単位で識別できるようにする。
+- 基本形と`FullArt`などバリアントの`.ini`が同じディレクトリに存在する場合は、同じ`Name`に揃えて書き込む。
 - 本ツールからバニラカード一覧を取得し、カードごとに新しい名前を設定・保存できるUIを提供する。
 
 #### 2. カード画像の置き換え
@@ -257,10 +259,17 @@ Vitality Level Add = 20
     - 管理名は`docs/vanilla-card-info.md`の「管理名」列を参照
   - 役割: ゲーム内のバニラカード画像をレアリティごとに差し替える
 - **カード名**
-  - パス: `BepInEx/plugins/TextureReplacer/objects_data/card/{名前}_{属性}_NAME.txt`
-    - 例: `.../card/Pigni_Fire_NAME.txt`
-    - 名前・属性はvanilla-card-info.mdの該当列を参照
+  - パス: `BepInEx/plugins/CustomExpansionPackImages/Configs/Custom/<Expansion>Configs/{管理名}.ini`
+    - 例: `.../Custom/TetramonConfigs/PiggyA.ini`
+    - 必要に応じて同ディレクトリ内の`{管理名}FullArt.ini`なども同じ名前で更新する
+    - 管理名はvanilla-card-info.mdの「管理名」列を参照
   - 役割: ゲーム内のバニラカード名を任意の名称に置き換える
+  - エクスパンションが複数存在する場合は、対象エクスパンションを明示的に指定して更新する
+
+> 画像保存時のディレクトリ構成
+- `BepInEx/plugins/ArtExpander/cardart/default/<Expansion>/<Rarity>/<管理名>.png`
+- `<Expansion>` は `Tetramon` や `Destiny` などパック名で分岐し、以下のレアリティ構成は全エクスパンション共通。
+- バニラカードの画像を保存する際は、対応するエクスパンション（存在しない場合は `Vanilla`）を用いてディレクトリを切り替える。
 
 ### 追加カードの情報更新
 - **カード画像**

@@ -71,7 +71,16 @@ BepInEx
     │               ├── FullArt
     │               ├── Gold
     │               └── Silver
-    └── TextureReplacer
-        ├── objects_data
-        │   └── cards  ...Tetramonパックの初期カードの設定ファイルが格納されるフォルダ
-        └── objects_textures
+    └── CustomExpansionPackImages  ...カード名・テキストの上書き設定を保持
+        ├── CustomExpansionPackImages.dll
+        └── Configs
+            └── Custom
+                ├── TetramonConfigs  ...Tetramon系カードの表示テキストを管理。直下の`.ini`のみ参照対象
+                │   ├── PiggyA.ini
+                │   ├── PiggyAFullArt.ini
+                │   └── ...
+                ├── DestinyConfigs  ...Destiny系カードの表示テキストを管理
+                │   └── ...
+                ├── GhostConfigs / CatJobConfigs / MegabotConfigs / FantasyRPGConfigs / NewMonstersConfigs など
+                │   └── ...
+                └── FullExpansionsConfigs  ...大容量セット。ツールでは探索対象外

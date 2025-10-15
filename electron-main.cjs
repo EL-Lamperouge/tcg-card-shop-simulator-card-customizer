@@ -2,6 +2,17 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ini = require('ini');
+const { pathToFileURL } = require('url');
+
+let cardNameServiceModulePromise;
+
+function getCardNameServiceModule() {
+  if (!cardNameServiceModulePromise) {
+    const modulePath = path.join(__dirname, 'src', 'backend', 'cardNameService.mjs');
+    cardNameServiceModulePromise = import(pathToFileURL(modulePath).href);
+  }
+  return cardNameServiceModulePromise;
+}
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -93,15 +104,15 @@ function createWindow() {
     return fs.readFileSync(filePath, 'utf-8');
   });
 
-  // バニラカード名保存API
-  ipcMain.handle('save-vanilla-card-name', async (_event, { baseDir, name, attribute, newName }) => {
+  // バニラカード名保存API（CustomExpansionPackImages 連携）
+  ipcMain.handle('save-vanilla-card-name', async (_event, payload) => {
     try {
-      if (!baseDir || !name || !attribute || !newName) throw new Error('パラメータ不足');
-      const saveDir = path.join(baseDir, 'BepInEx', 'plugins', 'TextureReplacer', 'objects_data', 'card');
-      if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
-      const savePath = path.join(saveDir, `${name}_${attribute}_NAME.txt`);
-      fs.writeFileSync(savePath, newName, 'utf-8');
-      return { success: true, path: savePath };
+      const { baseDir, adminName, newName, name, expansion } = payload || {};
+      const targetAdminName = (adminName || name || '').trim();
+      if (!baseDir || !targetAdminName || !newName) throw new Error('パラメータ不足');
+      const { setCardDisplayName } = await getCardNameServiceModule();
+      const updatedFiles = setCardDisplayName(baseDir, targetAdminName, newName, expansion);
+      return { success: true, path: updatedFiles[0] || null, paths: updatedFiles };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -150,14 +161,21 @@ function createWindow() {
   });
 
   // バニラカードの現在の表示名（カスタム名）取得API
-  ipcMain.handle('get-vanilla-card-display-name', async (_event, { baseDir, name, attribute }) => {
+  ipcMain.handle('get-vanilla-card-display-name', async (_event, { baseDir, adminName, name, expansion }) => {
     try {
-      if (!baseDir || !name || !attribute) throw new Error('パラメータ不足');
-      const filePath = path.join(baseDir, 'BepInEx', 'plugins', 'TextureReplacer', 'objects_data', 'card', `${name}_${attribute}_NAME.txt`);
-      if (!fs.existsSync(filePath)) return '';
-      return fs.readFileSync(filePath, 'utf-8');
+      const targetAdminName = (adminName || name || '').trim();
+      if (!baseDir || !targetAdminName) throw new Error('パラメータ不足');
+      const { getCardDisplayName, listCardNameEntries } = await getCardNameServiceModule();
+      const entries = listCardNameEntries(baseDir, targetAdminName);
+      if (expansion) {
+        const match = entries.find(entry => entry.expansion.toLowerCase() === expansion.trim().toLowerCase());
+        const nameValue = match ? match.name : getCardDisplayName(baseDir, targetAdminName, expansion);
+        return { entries, name: nameValue || '' };
+      }
+      const nameValue = getCardDisplayName(baseDir, targetAdminName);
+      return { entries, name: nameValue || '' };
     } catch (e) {
-      return '';
+      return { entries: [], name: '' };
     }
   });
 }

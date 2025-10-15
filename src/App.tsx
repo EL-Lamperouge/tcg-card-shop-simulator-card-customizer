@@ -27,7 +27,7 @@ const ipcRenderer = (window as any).require ? (window as any).require('electron'
 
 type IniFile = { path: string; content: string };
 type ImageInfo = { imgPath: string; pack: string; rarity: string; name: string };
-type CardInfo = { name: string; id: string; pack: string; rarity: string; image: string; monsterType: string; displayName: string };
+type CardInfo = { name: string; id: string; pack: string; rarity: string; image: string; monsterType: string; displayName: string; expansion?: string };
 
 // バニラカード情報の型
 interface VanillaCardInfo {
@@ -36,6 +36,7 @@ interface VanillaCardInfo {
   attribute: string;
   adminName: string; // 管理名
   displayName: string; // 現在の表示名
+  expansion: string; // CustomExpansionPackImages上のエクスパンション名
 }
 
 const RARITIES = ['Base', 'FirstEdition', 'Silver', 'Gold', 'EX', 'FullArt'];
@@ -59,16 +60,32 @@ async function fetchVanillaCardsWithDisplayName(baseDir: string | null): Promise
   const vanillaList = await Promise.all(dataLines.map(async (line: string) => {
     const [empty, name, id, attribute, adminName] = line.split('|').map((s: string) => s.trim());
     if (!name || !id || !attribute || !adminName) return null;
-    let displayName = name;
-    if (baseDir) {
-      try {
-        const customName = await ipcRenderer.invoke('get-vanilla-card-display-name', { baseDir, name, attribute });
-        if (customName && customName.trim() !== '') displayName = customName.trim();
-      } catch { }
+    if (!baseDir) {
+      return [{ name, id, attribute, adminName, displayName: name, expansion: 'Vanilla' }];
     }
-    return { name, id, attribute, adminName, displayName };
+    try {
+      const response = await ipcRenderer.invoke('get-vanilla-card-display-name', {
+        baseDir,
+        adminName,
+        name,
+      });
+      const entries = Array.isArray(response?.entries) ? response.entries : [];
+      if (entries.length === 0) {
+        const displayName = typeof response?.name === 'string' && response.name.trim() !== '' ? response.name.trim() : name;
+        return [{ name, id, attribute, adminName, displayName, expansion: 'Vanilla' }];
+      }
+      return entries.map((entry: any) => {
+        const expansion = typeof entry?.expansion === 'string' && entry.expansion.trim() !== '' ? entry.expansion : 'Vanilla';
+        const entryName = typeof entry?.name === 'string' && entry.name.trim() !== '' ? entry.name.trim() : name;
+        return { name, id, attribute, adminName, displayName: entryName, expansion };
+      });
+    } catch {
+      return [{ name, id, attribute, adminName, displayName: name, expansion: 'Vanilla' }];
+    }
   }));
-  return vanillaList.filter(Boolean) as VanillaCardInfo[];
+  return vanillaList
+    .filter(Boolean)
+    .flat() as VanillaCardInfo[];
 }
 
 function App() {
@@ -106,7 +123,7 @@ function App() {
   // モーダルを開くたびに名前・レアリティ初期化
   useEffect(() => {
     if (isOpen && selectedCard) {
-      setEditName(selectedCard.name);
+      setEditName(selectedCard.displayName || selectedCard.name);
       setEditRarity(selectedCard.rarity || 'Common');
     }
   }, [isOpen, selectedCard]);
@@ -135,6 +152,7 @@ function App() {
           image: '', // 後で紐付け
           monsterType: data['Monster Type'] || section,
           displayName: data.Name || section, // 追加カードはNameをそのまま
+          expansion: pack,
         };
       });
     });
@@ -160,11 +178,19 @@ function App() {
     if (!iniCards || !vanillaCards || !imageInfoList) return;
     const attachImage = (card: CardInfo): CardInfo => {
       let key = card.monsterType;
+      let targetPack = card.expansion || card.pack;
       if (card.pack === 'Vanilla') {
-        const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id);
-        if (vanilla) key = vanilla.adminName;
+        const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id && (v.expansion || '') === (card.expansion || ''));
+        if (vanilla) {
+          key = vanilla.adminName;
+          targetPack = vanilla.expansion || 'Vanilla';
+        } else {
+          targetPack = 'Vanilla';
+        }
+      } else if (!targetPack) {
+        targetPack = card.pack;
       }
-      const found = imageInfoList.find(img => img.pack === card.pack && img.rarity === 'Base' && img.name === key);
+      const found = imageInfoList.find(img => img.pack === targetPack && img.rarity === 'Base' && img.name === key);
       return { ...card, image: found ? found.imgPath : '' };
     };
     const mergedCards = [
@@ -177,6 +203,7 @@ function App() {
         image: '',
         monsterType: v.name,
         displayName: v.displayName,
+        expansion: v.expansion,
       }))
     ]
       .map(attachImage)
@@ -241,10 +268,12 @@ function App() {
   // 画像保存時のパラメータ決定
   const getImageSaveParams = (card: CardInfo, rarity: string): { pack: string; name: string } => {
     if (card.pack === 'Vanilla') {
-      const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id);
-      return { pack: 'Vanilla', name: vanilla?.adminName || card.name };
+      const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id && (v.expansion || '') === (card.expansion || ''));
+      const targetPack = vanilla?.expansion || 'Vanilla';
+      return { pack: targetPack, name: vanilla?.adminName || card.name };
     } else {
-      return { pack: 'Tetramon', name: card.monsterType };
+      const targetPack = card.expansion || card.pack || 'Tetramon';
+      return { pack: targetPack, name: card.monsterType };
     }
   };
 
@@ -252,15 +281,16 @@ function App() {
   const handleSaveName = async () => {
     if (!selectedCard || !baseDir) return;
     if (selectedCard.pack === 'Vanilla') {
-      const vanilla = vanillaCards.find(v => v.name === selectedCard.name && v.id === selectedCard.id);
+      const vanilla = vanillaCards.find(v => v.name === selectedCard.name && v.id === selectedCard.id && (v.expansion || '') === (selectedCard.expansion || ''));
       if (!vanilla) {
         alert('バニラカード情報が見つかりません');
         return;
       }
       const res = await ipcRenderer.invoke('save-vanilla-card-name', {
         baseDir,
+        adminName: vanilla.adminName,
         name: selectedCard.name,
-        attribute: vanilla.attribute,
+        expansion: vanilla.expansion,
         newName: editName,
       });
       if (!res.success) {
@@ -298,7 +328,7 @@ function App() {
   // 詳細画面で画像名を取得する関数
   const getImageName = (card: CardInfo) => {
     if (card.pack === 'Vanilla') {
-      const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id);
+      const vanilla = vanillaCards.find(v => v.name === card.name && v.id === card.id && (v.expansion || '') === (card.expansion || ''));
       return vanilla?.adminName || card.name;
     }
     return card.monsterType;
@@ -457,13 +487,18 @@ Vitality Level Add = 20
                 return (
                   card.displayName.toLowerCase().includes(keyword) ||
                   card.id.toLowerCase().includes(keyword) ||
-                  card.monsterType.toLowerCase().includes(keyword)
+                  card.monsterType.toLowerCase().includes(keyword) ||
+                  (card.expansion || '').toLowerCase().includes(keyword)
                 );
               });
             const totalPages = Math.ceil(filteredCards.length / PAGE_SIZE);
             const pagedCards = filteredCards.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
             return pagedCards.map(card => (
-              <Card key={card.id || card.monsterType} onClick={() => handleCardClick(card)} cursor="pointer">
+              <Card
+                key={`${card.pack}-${card.id}-${card.monsterType}-${card.expansion || 'default'}`}
+                onClick={() => handleCardClick(card)}
+                cursor="pointer"
+              >
                 <CardBody>
                   <Box>
                     <Image src={card.image ? `file://${encodeURI(card.image.replace(/\\/g, '/'))}` : PLACEHOLDER_IMG} alt={card.monsterType} borderRadius="md" objectFit="cover" w="100%" h="100%" />
@@ -471,6 +506,9 @@ Vitality Level Add = 20
                   <Text fontWeight="bold">{card.displayName}</Text>
                   <Text fontSize="sm" color="gray.500">ID: {card.id}</Text>
                   <Text fontSize="sm" color="gray.400">レアリティ: {card.rarity}</Text>
+                  {card.expansion ? (
+                    <Text fontSize="xs" color="gray.500">エクスパンション: {card.expansion}</Text>
+                  ) : null}
                 </CardBody>
               </Card>
             ));
@@ -485,7 +523,8 @@ Vitality Level Add = 20
                 return (
                   card.displayName.toLowerCase().includes(keyword) ||
                   card.id.toLowerCase().includes(keyword) ||
-                  card.monsterType.toLowerCase().includes(keyword)
+                  card.monsterType.toLowerCase().includes(keyword) ||
+                  (card.expansion || '').toLowerCase().includes(keyword)
                 );
               });
             const totalPages = Math.ceil(filteredCards.length / PAGE_SIZE);
